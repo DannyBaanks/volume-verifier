@@ -1,0 +1,67 @@
+﻿VOLUME VERIFIER HARDENING V1.1 - TEST RESULTS
+python : test_save_then_load_round_trip (test_volume_verifier.TestAtomicWrite.test_save_then_load_round_trip) ... ok
+En línea: 1 Carácter: 194
++ ... "$ev\01-tests.txt"; python -m unittest discover tests -v 2>&1 | Out-F ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_save_then_...nd_trip) ... ok:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+test_round_trip (test_volume_verifier.TestDpapi.test_round_trip) ... ok
+test_store_is_not_plaintext (test_volume_verifier.TestDpapi.test_store_is_not_plaintext) ... ok
+test_unprotect_garbage_raises (test_volume_verifier.TestDpapi.test_unprotect_garbage_raises) ... ok
+test_missing_line (test_volume_verifier.TestExtractVolumeId.test_missing_line) ... ok
+test_other_case (test_volume_verifier.TestExtractVolumeId.test_other_case) ... ok
+test_typical_line (test_volume_verifier.TestExtractVolumeId.test_typical_line) ... ok
+test_standard_differs_from_weak (test_volume_verifier.TestFingerprint.test_standard_differs_from_weak) ... ok
+test_standard_is_deterministic (test_volume_verifier.TestFingerprint.test_standard_is_deterministic) ... ok
+test_weak_known_value (test_volume_verifier.TestFingerprint.test_weak_known_value) ... ok
+test_weak_normalises_to_lowercase (test_volume_verifier.TestFingerprint.test_weak_normalises_to_lowercase) ... ok
+test_v1_store_migrates_on_register (test_volume_verifier.TestLegacyMigration.test_v1_store_migrates_on_register) ... ok
+test_v1_store_rejected_on_verify (test_volume_verifier.TestLegacyMigration.test_v1_store_rejected_on_verify) ... ok
+test_colon (test_volume_verifier.TestNormalizeVolume.test_colon) ... ok
+test_invalid (test_volume_verifier.TestNormalizeVolume.test_invalid) ... ok
+test_plain_letter_lowercase (test_volume_verifier.TestNormalizeVolume.test_plain_letter_lowercase) ... ok
+test_trailing_slash (test_volume_verifier.TestNormalizeVolume.test_trailing_slash) ... ok
+test_unsupported_platform_register (test_volume_verifier.TestPlatformGate.test_unsupported_platform_register) ... ok
+test_unsupported_platform_verify (test_volume_verifier.TestPlatformGate.test_unsupported_platform_verify) ... ok
+test_bad_fingerprint_hex_is_corrupt (test_volume_verifier.TestStoreSchema.test_bad_fingerprint_hex_is_corrupt) ... ok
+test_bad_strength_is_corrupt (test_volume_verifier.TestStoreSchema.test_bad_strength_is_corrupt) ... ok
+test_entry_missing_fields_is_corrupt (test_volume_verifier.TestStoreSchema.test_entry_missing_fields_is_corrupt) ... ok
+test_invalid_json_is_corrupt (test_volume_verifier.TestStoreSchema.test_invalid_json_is_corrupt) ... ok
+test_legacy_plaintext_dict_is_schema_mismatch 
+(test_volume_verifier.TestStoreSchema.test_legacy_plaintext_dict_is_schema_mismatch) ... ok
+test_not_a_dict_is_corrupt (test_volume_verifier.TestStoreSchema.test_not_a_dict_is_corrupt) ... ok
+test_tampered_payload_is_corrupt (test_volume_verifier.TestStoreSchema.test_tampered_payload_is_corrupt) ... ok
+test_valid_store_loads (test_volume_verifier.TestStoreSchema.test_valid_store_loads) ... ok
+test_wrong_format_version_is_schema_mismatch 
+(test_volume_verifier.TestStoreSchema.test_wrong_format_version_is_schema_mismatch) ... ok
+test_not_registered_is_deny (test_volume_verifier.TestVerdicts.test_not_registered_is_deny) ... ok
+test_t01_normal_bitlocker_metadata (test_volume_verifier.TestVerdicts.test_t01_normal_bitlocker_metadata) ... ok
+test_t02a_weak_register_no_bitlocker (test_volume_verifier.TestVerdicts.test_t02a_weak_register_no_bitlocker) ... ok
+test_t02b_standard_metadata_unavailable_is_deny_not_pass 
+(test_volume_verifier.TestVerdicts.test_t02b_standard_metadata_unavailable_is_deny_not_pass) ... ok
+test_t03_manage_bde_failure_blocks_register 
+(test_volume_verifier.TestVerdicts.test_t03_manage_bde_failure_blocks_register) ... ok
+test_t04_insufficient_privileges_is_explicit 
+(test_volume_verifier.TestVerdicts.test_t04_insufficient_privileges_is_explicit) ... ok
+test_t04b_hresult_access_denied_classified 
+(test_volume_verifier.TestVerdicts.test_t04b_hresult_access_denied_classified)
+manage-bde returns HRESULT 0x80070005 (ERROR_ACCESS_DENIED): ... ok
+test_t05_volume_query_failure_is_error (test_volume_verifier.TestVerdicts.test_t05_volume_query_failure_is_error) ... 
+ok
+test_t06_store_missing_is_deny (test_volume_verifier.TestVerdicts.test_t06_store_missing_is_deny) ... ok
+test_t07_store_corrupted_is_error (test_volume_verifier.TestVerdicts.test_t07_store_corrupted_is_error) ... ok
+test_t08_modified_store_payload_is_corrupt 
+(test_volume_verifier.TestVerdicts.test_t08_modified_store_payload_is_corrupt) ... ok
+test_t09_registered_original_passes (test_volume_verifier.TestVerdicts.test_t09_registered_original_passes) ... ok
+test_t10_copied_vhdx_is_deny (test_volume_verifier.TestVerdicts.test_t10_copied_vhdx_is_deny)
+Mirrors the identity-copy experiment: a copy has a different UniqueId. ... ok
+test_t11_detach_attach_same_identity_passes 
+(test_volume_verifier.TestVerdicts.test_t11_detach_attach_same_identity_passes)
+Same UniqueId after detach/attach: identity is continuous. ... ok
+
+----------------------------------------------------------------------
+Ran 42 tests in 0.299s
+
+OK
+EXIT=0

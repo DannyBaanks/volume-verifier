@@ -1,0 +1,13 @@
+﻿HMAC_PASSPHRASE + seam - TEST RESULTS (v1.2)
+python : .......................................................
+En línea: 1 Carácter: 198
++ ... ev\01-hmac-tests.txt"; python -m unittest discover tests 2>&1 | Out-F ...
++                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (.................................:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+----------------------------------------------------------------------
+Ran 55 tests in 0.952s
+
+OK
+EXIT=0

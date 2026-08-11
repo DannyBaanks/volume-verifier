@@ -1,0 +1,10 @@
+﻿--- como usuario (sin root) ---
+985d4e88-aa64-40e5-9b8c-00527c683d68
+60022480b6c9acabccdf04bd22304482
+ID_SERIAL_SHORT=60022480b6c9acabccdf04bd22304482
+--- mapeo mountpoint -> device (findmnt) ---
+/dev/sde
+--- lsblk uuid+serial por dispositivo ---
+NAME PKNAME UUID                                 SERIAL
+sdd         985d4e88-aa64-40e5-9b8c-00527c683d68 60022480b6c9acabccdf04bd22304482
+--- blkid como usuario (esperado: vacio o error) ---

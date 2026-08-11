@@ -1,0 +1,17 @@
+﻿header_uuid=e6f9dbca-b985-4b86-b489-bc3c880a8b16
+findmnt_SOURCE=/dev/mapper/vvcrypt4
+lsblk_PKNAME=   -> /dev/
+--- luksUUID on mapper (open) ---
+mapper_luksUUID=[]
+--- luksUUID on backing (/dev/) ---
+wsl : Device /dev/ is not compatible.
+En línea: 1 Carácter: 1
++ wsl -d Ubuntu -u root -e bash "/mnt/c/Development/ISyCo Git/Volume Ve ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Device /dev/ is not compatible.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+backing_luksUUID=[]
+--- conclusion ---
+MAPPER_FAIL
+BACKING_FAIL

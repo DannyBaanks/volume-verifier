@@ -1,0 +1,79 @@
+﻿python : 166 INFO: PyInstaller: 6.22.0, contrib hooks: 2026.6
+En C:\Development\ISyCo Git\Volume Verifier\build.ps1: 19 Carácter: 1
++ python -m PyInstaller --onefile --clean --noconfirm `
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (166 INFO: PyIns...b hooks: 2026.6:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+167 INFO: Python: 3.12.4
+195 INFO: Platform: Windows-11-10.0.26200-SP0
+196 INFO: Python environment: C:\Users\progr\AppData\Local\Programs\Python\Python312
+197 INFO: wrote build\volume-verifier.spec
+277 INFO: Removing temporary files and cleaning cache in C:\Users\progr\AppData\Local\pyinstaller
+279 INFO: Module search paths (PYTHONPATH):
+['C:\\Development\\ISyCo Git\\Volume Verifier',
+ 'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\python312.zip',
+ 'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\DLLs',
+ 'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib',
+ 'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312',
+ 'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages',
+ 'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\win32',
+ 'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\win32\\lib',
+ 'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\pythonwin',
+ 'C:\\Development\\ISyCo Git\\Volume Verifier\\source']
+1009 INFO: checking Analysis
+1009 INFO: Building Analysis because Analysis-00.toc is non existent
+1009 INFO: Looking for Python shared library...
+1010 INFO: Using Python shared library: C:\Users\progr\AppData\Local\Programs\Python\Python312\python312.dll
+1010 INFO: Running Analysis Analysis-00.toc
+1010 INFO: Target bytecode optimization level: 0
+1010 INFO: Initializing module dependency graph...
+1011 INFO: Initializing module graph hook caches...
+1024 INFO: Analyzing modules for base_library.zip ...
+2242 INFO: Processing standard module hook 'hook-encodings.py' from 
+'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+2727 INFO: Processing standard module hook 'hook-math.py' from 
+'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+3439 INFO: Processing standard module hook 'hook-pickle.py' from 
+'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4152 INFO: Processing standard module hook 'hook-heapq.py' from 
+'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4490 INFO: Caching module dependency graph...
+4528 INFO: Analyzing C:\Development\ISyCo Git\Volume Verifier\source\volume_verifier.py
+4548 INFO: Processing standard module hook 'hook-_ctypes.py' from 
+'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks'
+4577 INFO: Processing module hooks (post-graph stage)...
+4580 INFO: Performing binary vs. data reclassification (1 entries)
+4582 INFO: Looking for ctypes DLLs
+4588 INFO: Analyzing run-time hooks ...
+4589 INFO: Including run-time hook 'pyi_rth_inspect.py' from 
+'C:\\Users\\progr\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+4593 INFO: Creating base_library.zip...
+4613 INFO: Looking for dynamic libraries
+4726 INFO: Extra DLL search directories (AddDllDirectory): []
+4726 INFO: Extra DLL search directories (PATH): []
+5015 INFO: Warnings written to C:\Development\ISyCo Git\Volume Verifier\build\volume-verifier\warn-volume-verifier.txt
+5028 INFO: Graph cross-reference written to C:\Development\ISyCo Git\Volume 
+Verifier\build\volume-verifier\xref-volume-verifier.html
+5042 INFO: checking PYZ
+5042 INFO: Building PYZ because PYZ-00.toc is non existent
+5042 INFO: Building PYZ (ZlibArchive) C:\Development\ISyCo Git\Volume Verifier\build\volume-verifier\PYZ-00.pyz
+5148 INFO: Building PYZ (ZlibArchive) C:\Development\ISyCo Git\Volume Verifier\build\volume-verifier\PYZ-00.pyz 
+completed successfully.
+5161 INFO: checking PKG
+5161 INFO: Building PKG because PKG-00.toc is non existent
+5161 INFO: Building PKG (CArchive) volume-verifier.pkg
+7082 INFO: Building PKG (CArchive) volume-verifier.pkg completed successfully.
+7083 INFO: Bootloader C:\Users\progr\AppData\Local\Programs\Python\Python312\Lib\site-packages\PyInstaller\bootloader\W
+indows-64bit-intel\run.exe
+7083 INFO: checking EXE
+7083 INFO: Building EXE because EXE-00.toc is non existent
+7084 INFO: Building EXE from EXE-00.toc
+7084 INFO: Copying bootloader EXE to C:\Development\ISyCo Git\Volume Verifier\dist\volume-verifier.exe
+7457 INFO: Copying icon to EXE
+7522 INFO: Copying 0 resources to EXE
+7522 INFO: Embedding manifest in EXE
+7576 INFO: Appending PKG archive to EXE
+7646 INFO: Fixing EXE headers
+7881 INFO: Building EXE from EXE-00.toc completed successfully.
+7882 INFO: Build complete! The results are available in: C:\Development\ISyCo Git\Volume Verifier\dist

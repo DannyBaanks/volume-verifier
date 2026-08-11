@@ -1,0 +1,17 @@
+﻿wsl : wsl: Failed to start the systemd user session for 'root'. See journalctl for more details.
+En línea: 1 Carácter: 1
++ wsl -d Ubuntu -u root -e bash "/mnt/c/Development/ISyCo Git/Volume Ve ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (wsl: Failed to ...r more details.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+header_uuid=ab72a173-c43b-468b-b2d5-3e83338ce63d
+findmnt_SOURCE=/dev/mapper/vvcrypt5
+--- cryptsetup status (slow-path, no root needed to read) ---
+  device:  /dev/loop0
+resolved_backing=[/dev/loop0]
+--- luksUUID on backing ---
+backing_luksUUID=[ab72a173-c43b-468b-b2d5-3e83338ce63d]
+BACKING_OK (approach works)
+--- dmsetup deps alternative ---
+1 dependencies	: (7, 0)

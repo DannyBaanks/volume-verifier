@@ -1,0 +1,13 @@
+﻿v1.2 exe smoke (HMAC store, real exe):
+correct passphrase:
+VERDICT: ERROR
+REASON: VOLUME_QUERY_FAILED
+exit=2
+wrong passphrase:
+VERDICT: ERROR
+REASON: STORE_MAC_MISMATCH
+exit=2
+no passphrase:
+VERDICT: ERROR
+REASON: STORE_PASSPHRASE_REQUIRED
+exit=2

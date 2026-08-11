@@ -1,0 +1,28 @@
+﻿== luksUUID ==
+2cdf8c67-1ae4-49fe-b57d-ad5a63d13758
+== luksDump (uuid lineas) ==
+LUKS header information
+Version:       	2
+Epoch:         	3
+Metadata area: 	16384 [bytes]
+Keyslots area: 	16744448 [bytes]
+UUID:          	2cdf8c67-1ae4-49fe-b57d-ad5a63d13758
+Label:         	(no label)
+Subsystem:     	(no subsystem)
+Flags:       	(no flags)
+
+Data segments:
+  0: crypt
+== blkid del LUKS ==
+vol.img: UUID="2cdf8c67-1ae4-49fe-b57d-ad5a63d13758" TYPE="crypto_LUKS"
+== abrir y consultar ==
+Name:              exp
+State:             ACTIVE
+Read Ahead:        5120
+Tables present:    LIVE
+Open count:        0
+Event number:      0
+Major, minor:      254, 0
+Number of targets: 1
+NAME UUID TYPE  FSTYPE
+exp       crypt 

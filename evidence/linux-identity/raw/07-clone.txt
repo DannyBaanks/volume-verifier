@@ -1,0 +1,52 @@
+﻿--- lsblk ---
+NAME  TYPE   SIZE MOUNTPOINT
+ram0  disk     4M 
+ram1  disk     4M 
+ram2  disk     4M 
+ram3  disk     4M 
+ram4  disk     4M 
+ram5  disk     4M 
+ram6  disk     4M 
+ram7  disk     4M 
+ram8  disk     4M 
+ram9  disk     4M 
+ram10 disk     4M 
+ram11 disk     4M 
+ram12 disk     4M 
+ram13 disk     4M 
+ram14 disk     4M 
+ram15 disk     4M 
+loop0 loop     0B 
+loop1 loop     0B 
+loop2 loop     0B 
+loop3 loop     0B 
+loop4 loop     0B 
+loop5 loop     0B 
+loop6 loop     0B 
+loop7 loop     0B 
+sda   disk 356.9M 
+sdb   disk 159.5M 
+sdc   disk     2G [SWAP]
+sdd   disk     1T /mnt/wslg/distro
+--- seriales ---
+NAME SERIAL                           WWN                                MODEL
+sda  60022480df18deb7e179255b7b21f6fa 0x60022480df18deb7e179255b7b21f6fa Virtual Disk
+sdb  600224806ca9c06d835376681e4a916b 0x600224806ca9c06d835376681e4a916b Virtual Disk
+sdc  60022480f3b8080f52ab4a48c58a63dc 0x60022480f3b8080f52ab4a48c58a63dc Virtual Disk
+sdd  60022480b6c9acabccdf04bd22304482 0x60022480b6c9acabccdf04bd22304482 Virtual Disk
+--- blkid ---
+/dev/sdd: UUID="985d4e88-aa64-40e5-9b8c-00527c683d68" BLOCK_SIZE="4096" TYPE="ext4"
+/dev/sdb: BLOCK_SIZE="4096" TYPE="ext4"
+/dev/sdc: UUID="53c32d1d-6c08-4c22-a69a-5823472ab8d6" TYPE="swap"
+/dev/sda: BLOCK_SIZE="4096" TYPE="ext4"
+--- udev sda ---
+ID_SERIAL=360022480df18deb7e179255b7b21f6fa
+ID_SERIAL_SHORT=60022480df18deb7e179255b7b21f6fa
+ID_WWN=0x60022480df18deb7
+ID_WWN_VENDOR_EXTENSION=0xe179255b7b21f6fa
+ID_WWN_WITH_EXTENSION=0x60022480df18deb7e179255b7b21f6fa
+ID_PATH=acpi-MSFT1000:00-scsi-0:0:0:0
+ID_PATH_TAG=acpi-MSFT1000_00-scsi-0_0_0_0
+--- hostname ---
+Danny
+Danny

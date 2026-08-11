@@ -3,12 +3,16 @@
 # The published executable was built from the source in this repository.
 # Rebuild from source and compare behavior (see TESTING.md).
 #
-# SHA-256 of the published binary (volume-verifier.exe, 6,525,253 bytes):
-bd288f2eb770316a8aadde6d3ede64103d647d04a91da064d9008b34f55268b1  volume-verifier.exe
+# SHA-256 of the published binary (volume-verifier.exe):
+727dfe9bd4d866ff7f8f06ed8426bb9e76dfffa7e0480e73567c1055b226eece  volume-verifier.exe
 
-# Reference build produced from source/volume_verifier.py with build.ps1
-# (PyInstaller 6.22.0, Python 3.12.4, Windows) during repository setup.
 # NOTE: PyInstaller embeds build metadata (timestamps, versions), so a fresh
 # build is NOT byte-for-byte identical to the published binary. Verify by
 # rebuilding and comparing behavior, not by comparing hashes.
-0a3105cc02d41fa72605b63e21c23b92de6392c0beabe010b895bb8470e39f59  dist/volume-verifier.exe (reference build)
+# Reference builds (same source, documented in evidence/):
+# 8558efcf7d2a0e64a751da51c2d864a62f8624ff520a9b633891b091ea7746cf  (v1.2.0)
+# c0f101a9cce5e43a81fceabbfb9bfed2802634f5372813b4d4a7eefc08fd6602  (v1.1)
+# 93adb153ce78e5de01af8a5df762a1c1586b2c83fbfd36c07998cb9b09eb3991  (v1.1 rebuild)
+#
+# Historical v1.0 binary (superseded on 2026-08-11):
+bd288f2eb770316a8aadde6d3ede64103d647d04a91da064d9008b34f55268b1  volume-verifier.exe (v1.0, superseded)

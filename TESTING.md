@@ -23,9 +23,25 @@ behavior matches the source.
 python -m unittest discover tests -v
 ```
 
-Covers: fingerprint computation, `manage-bde` output parsing, and store
-round-trip. These test the logic only; the experiment below tests the real
-behavior.
+42 tests, including the T1–T12 hardening scenarios:
+
+| # | Scenario | Expectation |
+|---|---|---|
+| T1 | Normal BitLocker metadata | register STANDARD, verify PASS |
+| T2 | BitLocker metadata unavailable | STANDARD verify → `DENY BITLOCKER_METADATA_UNAVAILABLE` (no silent fallback) |
+| T3 | `manage-bde` failure | registration blocked (`BITLOCKER_QUERY_FAILED`) |
+| T4 | Insufficient privileges | `INSUFFICIENT_PRIVILEGES`, including HRESULT `0x80070005` classification |
+| T5 | Malformed external output | `VOLUME_QUERY_FAILED` / metadata unavailable — explicit |
+| T6 | Store missing | `DENY STORE_MISSING` |
+| T7 | Store corrupted | `ERROR STORE_CORRUPTED` |
+| T8 | Store modified (tampered) | DPAPI decrypt failure → `STORE_CORRUPTED` |
+| T9 | Registered original volume | PASS (mocked, mirrors experiment) |
+| T10 | Copied VHDX (different UniqueId) | `DENY FINGERPRINT_MISMATCH` (mocked) |
+| T11 | Detach/attach (same UniqueId) | PASS (mocked) |
+| T12 | Unsupported platform | `UNSUPPORTED_PLATFORM` |
+
+All tests use mocked evidence acquisition and temporary stores. No real
+volume is modified, destroyed, unlocked, or formatted.
 
 ## 3. The identity-copy experiment
 
@@ -43,7 +59,7 @@ original?
    (Get-Volume -DriveLetter T).UniqueId
    ```
 
-3. Register it:
+3. Register it (needs an elevated shell for the `manage-bde` query):
 
    ```powershell
    volume-verifier.exe --volume T: --register
@@ -67,19 +83,15 @@ original?
 ### Expected results
 
 - Original after detach/attach: **same** `UniqueId` → `PASS`.
-- Copy: **different** `UniqueId` → `DENY`.
+- Copy: **different** `UniqueId` → `DENY / FINGERPRINT_MISMATCH`.
 
-The automated version of this procedure is below.
+The automated version of this procedure is `Test-VolumeIdentity.ps1` (below).
 
 ## 4. Automated experiment script
 
-The script `Test-VolumeIdentity.ps1` performs steps 1–5 end-to-end. It was
-the script used to generate the evidence in
-`evidence/identity-copy-experiment/`.
-
 ```powershell
-# requires: the VHDX mounted as T: (or offline), and volume-verifier.exe
-#           in the same directory
+# requires: the VHDX mounted as T: (or offline), volume-verifier.exe in the
+#           same directory, and an elevated shell for registration
 .\Test-VolumeIdentity.ps1 -OriginalVhdxPath "C:\path\to\test-volume.vhdx"
 ```
 
@@ -206,7 +218,97 @@ Dismount-VHD -Path $copyPath -Confirm:$false
 Write-Host "`n¡Prueba completada!"
 ```
 
-## 5. Interpreting the result
+Note: since v1.1, `volume-verifier.exe --register` requires a successful
+`manage-bde` query (elevated shell). Without elevation the registration
+fails explicitly with `BITLOCKER_QUERY_FAILED` or
+`INSUFFICIENT_PRIVILEGES` — this is by design, not a bug.
+
+## 5. Store behavior changes in v1.1+
+
+- Stores are now DPAPI-protected and schema-versioned (`format_version: 2`).
+- A legacy v1 plaintext store is rejected on verify
+  (`STORE_SCHEMA_MISMATCH`) and migrated automatically the next time
+  `--register` is run.
+- Store tampering is detected (`STORE_CORRUPTED`): the payload is encrypted,
+  so an invalid modification cannot be parsed as valid identity.
+
+## 5b. HMAC_PASSPHRASE portable store (v1.2)
+
+Optional portable protection via passphrase (integrity/authenticity only —
+no encryption, no keys derived beyond the passphrase, no BitLocker keys):
+
+```powershell
+# Register with a passphrase -> the store becomes HMAC_PASSPHRASE
+volume-verifier.exe --volume C: --register --passphrase "mi-frase"
+
+# Verify with the passphrase
+volume-verifier.exe --volume C: --passphrase "mi-frase"
+# or via environment
+$env:VOLUME_VERIFIER_PASSPHRASE = "mi-frase"
+volume-verifier.exe --volume C:
+```
+
+Expected behaviors:
+
+- HMAC store without passphrase → `ERROR / STORE_PASSPHRASE_REQUIRED`.
+- Wrong passphrase → `ERROR / STORE_MAC_MISMATCH` (same reason as tampering;
+  the two are cryptographically indistinguishable).
+- Payload is visible in the file (integrity-only by design).
+- A passphrase on an existing DPAPI store deterministically re-protects it
+  to HMAC_PASSPHRASE (entries preserved).
+- Default remains DPAPI when no passphrase is given.
+
+## 6. Linux platform (v1.3, evidence-backed)
+
+The Linux source is functional and has been verified against a real WSL2
+Ubuntu 26.04 environment (kernel 6.18.33.1-microsoft-standard-WSL2).
+All observations come from standard, non-root commands:
+
+```bash
+# Register a plain ext4 volume (WEAK — no LUKS)
+volume-verifier.py --volume /mnt/data --register --passphrase "k1"
+
+# Register a LUKS-encrypted volume (STANDARD — has LUKS UUID)
+volume-verifier.py --volume /mnt/crypt --register --passphrase "k1"
+
+# Verify
+volume-verifier.py --volume /mnt/data --passphrase "k1"
+# VERDICT: PASS / WEAK
+volume-verifier.py --volume /mnt/crypt --passphrase "k1"
+# VERDICT: PASS / STANDARD
+```
+
+Strength semantics (mirrors Windows):
+
+| Strength | Condition |
+|----------|-----------|
+| WEAK | Filesystem UUID only (no LUKS encryption metadata) |
+| STANDARD | Filesystem UUID + LUKS UUID (encryption metadata present) |
+
+Expected behaviors (same HMAC store model as Windows):
+
+- Store without passphrase → `ERROR / STORE_PASSPHRASE_REQUIRED`.
+- Wrong passphrase → `ERROR / STORE_MAC_MISMATCH`.
+- Registered STANDARD entry but LUKS UUID now unreadable →
+  `DENY / LUKS_METADATA_UNAVAILABLE`.
+- No `blkid`, no root; commands used: `findmnt`, `lsblk`, `cryptsetup`.
+
+Full raw evidence and experiment logs in `evidence/linux-identity/raw/`.
+
+## 7. Test matrix (v1.3)
+
+| Platform | Store | Passphrase | Expected outcome |
+|----------|-------|------------|------------------|
+| win32 | DPAPI (default) | none | register/verify work |
+| win32 | HMAC | correct | PASS |
+| win32 | HMAC | wrong | ERROR STORE_MAC_MISMATCH |
+| win32 | HMAC | missing | ERROR STORE_PASSPHRASE_REQUIRED |
+| win32 | tampered | correct | ERROR STORE_MAC_MISMATCH |
+| linux (WSL2) | HMAC | correct | PASS (WEAK or STANDARD) |
+| linux (WSL2) | HMAC | wrong | ERROR STORE_MAC_MISMATCH |
+| darwin | any | any | ERROR UNSUPPORTED_PLATFORM |
+
+## 6. Interpreting the result
 
 - If the GUIDs **differ**: Windows assigns a new `UniqueId` to the copy.
   The verifier's `DENY` is evidence that the copy is a different logical
@@ -214,6 +316,9 @@ Write-Host "`n¡Prueba completada!"
 - If the GUIDs were **identical**: the identity check would pass on a copy —
   which is exactly why the tool's claim is limited to "same logical
   instance", never "original physical hardware".
+- A `DENY` with `REASON: BITLOCKER_METADATA_UNAVAILABLE` means the registered
+  identity was STANDARD but the BitLocker Volume ID could not be obtained
+  now — not that the volume is a copy.
 
 Either outcome is informative. Run the experiment and record your own
 numbers before drawing conclusions.

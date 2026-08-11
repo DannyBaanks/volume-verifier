@@ -1,0 +1,35 @@
+﻿===== [e2e] setup =====
+2026-08-11T20:59:31Z
+Linux Danny 6.18.33.1-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Fri Jun  5 01:12:21 UTC 2026 x86_64 GNU/Linux
+plain mountpoint: /dev/loop0  (uuid e25e1c41-79ce-4768-9092-3cb8e8b0f76e)
+crypt mountpoint: /dev/mapper/vvcrypt (backing: /dev/loop1)
+luks uuid (on backing): e1b164f2-1344-4964-9a84-d09d5154c0f9
+fs uuid:   b319bdc5-4ba8-479d-8760-6190de996e58
+===== [e2e] register WEAK (plain ext4) =====
+[VERIFIER] Registered linux volume /mnt/vv_plain (identity_strength=WEAK).
+===== [e2e] verify WEAK (correct passphrase) =====
+VERDICT: PASS
+REASON: MATCHED_REGISTERED_IDENTITY
+STRENGTH: WEAK
+exit=0
+===== [e2e] verify WEAK (wrong passphrase) =====
+VERDICT: ERROR
+REASON: STORE_MAC_MISMATCH
+exit=2
+===== [e2e] register STANDARD (LUKS) =====
+[VERIFIER] Registered linux volume /mnt/vv_crypt (identity_strength=STANDARD).
+===== [e2e] verify STANDARD (correct passphrase) =====
+VERDICT: PASS
+REASON: MATCHED_REGISTERED_IDENTITY
+STRENGTH: STANDARD
+exit=0
+===== [e2e] store wrapper =====
+protection: HMAC_PASSPHRASE
+keys: ['/mnt/vv_crypt', '/mnt/vv_plain']
+===== [e2e] tamper: flip a payload byte =====
+(tampered) verify STANDARD:
+VERDICT: ERROR
+REASON: STORE_MAC_MISMATCH
+exit=2
+===== [e2e] cleanup =====
+done

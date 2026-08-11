@@ -1,0 +1,11 @@
+﻿CLI checks on rebuilt exe (sha256 93adb153...):
+volume-verifier.exe 1.1.0
+exit=0
+VERDICT: DENY
+REASON: STORE_MISSING
+exit=1
+VERDICT: ERROR
+REASON: BITLOCKER_QUERY_FAILED
+MESSAGE: manage-bde exited with code 2147749891
+exit=2
+store file exists after failed register: False
