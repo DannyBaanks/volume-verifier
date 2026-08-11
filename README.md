@@ -65,7 +65,7 @@ hardware-backed attestation, so a STRONG claim would be dishonest.
 | 1 | DENY | `BITLOCKER_METADATA_UNAVAILABLE` | STANDARD identity, but no BitLocker Volume ID now |
 | 1 | DENY | `BITLOCKER_QUERY_FAILED` | `manage-bde` failed (e.g. tool missing) |
 | 1 | DENY | `INSUFFICIENT_PRIVILEGES` | `manage-bde` needs elevation |
-| 2 | ERROR | `UNSUPPORTED_PLATFORM` | Not Windows |
+| 2 | ERROR | `UNSUPPORTED_PLATFORM` | Not Windows or Linux (macOS) |
 | 2 | ERROR | `STORE_CORRUPTED` | Store cannot be decrypted or parsed |
 | 2 | ERROR | `STORE_SCHEMA_MISMATCH` | Store format/protection incompatible (re-register) |
 | 2 | ERROR | `STORE_PROTECTION_UNAVAILABLE` | DPAPI unavailable |
@@ -110,9 +110,7 @@ every failure produces an explicit reason code.
 
 ## Requirements and conditions
 
-- Windows 10/11 with BitLocker tooling available. Non-Windows platforms are
-  rejected explicitly with `UNSUPPORTED_PLATFORM` (Linux/macOS evidence
-  sources are a documented roadmap, not implemented).
+- **Windows 10/11** with BitLocker tooling available. **Linux** (kernel 5.10+, `findmnt`/`lsblk`/`cryptsetup` in PATH) is supported experimentally with HMAC_PASSPHRASE stores. **macOS** is rejected explicitly with `UNSUPPORTED_PLATFORM` (no genuine macOS hardware available, VM .iso is malleable).
 - `manage-bde` queries may require an elevated shell; a failed query is an
   explicit error, never a silent WEAK fallback.
 - A previous `--register` must exist; without a stored identity the verdict
@@ -182,14 +180,15 @@ filesystem reformat, not disk copying (documented, not assumed).
 - `evidence/` — experiments and research (identity-copy, hardening v1.1,
   portable store research, portable reader protocol, TPM experiment).
 
-## Roadmap (documented, not implemented)
+## Roadmap (documented, partially implemented)
 
 | Line | Status | Never |
 |---|---|---|
 | Recovery guide | docs done (`docs/RECOVERY.md`) | never a bypass, never without credential |
-| Portable store | research done (`evidence/portable-store/`) | never stores/derives keys |
+| Portable store (HMAC_PASSPHRASE) | **implemented v1.3** (`evidence/portable-store/`) | never stores/derives keys |
 | Portable metadata reader | protocol done (`evidence/portable-reader/`) | read-only, no unlock/decrypt/write |
 | TPM identity | protocol done (`evidence/tpm-identity/`) | platform evidence only, never volume identity |
+| Linux platform source | **implemented v1.3** (`evidence/linux-identity/`) | no fake evidence, no macOS without hw |
 
 Policy: no component unlocks BitLocker, decrypts content, derives or stores
 recovery keys, or provides bypass. Evidence before implementation; review

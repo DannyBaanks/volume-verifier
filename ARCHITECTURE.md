@@ -78,9 +78,9 @@ volume-verifier (product)
 │   ├── reason codes + verdicts
 │   └── tests
 └── platform sources (one per OS)
-    ├── windows   # PowerShell Get-Volume + manage-bde (current)
-    ├── linux     # block/filesystem metadata (planned)
-    └── macos     # diskutil/APFS metadata (planned)
+    ├── windows   # PowerShell Get-Volume + manage-bde (v1.x)
+    ├── linux     # findmnt + lsblk + cryptsetup (v1.3, evidence-backed)
+    └── macos     # diskutil/APFS metadata (planned — needs real hardware)
 ```
 
 Planned public contract for a platform source (local, plain name):
@@ -90,12 +90,12 @@ class PlatformVolumeSource:
     def get_observations(self, volume) -> VolumeIdentity: ...
 ```
 
-Constraints for V2.0:
+Constraints for future cross-platform extensions:
 
 1. **No fingerprint equivalence across platforms.** A fingerprint is
    meaningful only within its platform. The schema already carries a
    `platform` field per identity, so no migration is needed.
-2. **Evidence per platform, claims per platform.** Linux/macOS sources are
+2. **Evidence per platform, claims per platform.** New platform sources are
    only added after real-machine experiments on those platforms produce
    evidence (the Windows VHDX experiment is not transferable).
 3. **Strength tiers per platform.** WEAK/STANDARD may not mean the same
@@ -108,13 +108,15 @@ Constraints for V2.0:
    portable; native language options (if ever needed) are a distribution
    decision, not an architecture one.
 
-## Why V2.0 is not in v1.1
+## Why macOS is not in v1.x
 
 Evidence before narrative. The Windows adapter is proven by the
-identity-copy experiment and by tests. Linux/macOS observations have no
-experiments in this repository yet; shipping untested evidence acquisition
-would violate the project's own rule. The seam (platform gate, `platform`
-field in the schema) is already in place so V2.0 can be added on top.
+identity-copy experiment and by tests. The Linux adapter (v1.3) is backed
+by real WSL2 Ubuntu 26.04 evidence (`evidence/linux-identity/`). macOS
+observations have no experiments in this repository — no genuine macOS
+hardware is available, and a macOS .iso inside a VM is malleable. The seam
+(`PlatformVolumeSource`) is already in place so macOS can be added on top
+when real evidence exists.
 
 ## Work lines and standing policy
 
