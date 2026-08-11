@@ -1,0 +1,3 @@
+# Build-time only. The program itself has zero pip dependencies
+# (Python standard library only).
+pyinstaller>=6.0

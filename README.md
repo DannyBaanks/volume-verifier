@@ -1,120 +1,108 @@
-<#==========================================================================#>
-# Test-VolumeIdentity.ps1
-# ---------------------------------------------------------------------------
-#  1) Desmonta (si está montado) el VHDX que respalda la unidad T:
-#  2) Lo copia a “…_copy.vhdx”.
-#  3) Monta ambas imágenes simultáneamente como T: (original) y U: (copia).
-#  4) Obtiene el GUID del volumen (UniqueId) de cada letra con Get‑Volume.
-#  5) Opcional: usa volume‑verifier.exe para registrar/validar cada una.
-#  6) Informa si los GUID coinciden → el UniqueId se copia; si divergen → se genera uno nuevo.
-#==========================================================================#>
+# Volume Verifier
 
-param(
-    [Parameter(Mandatory=$true,
-               HelpMessage="Ruta completa del VHDX que está montado como T:")]
-    [ValidateScript({Test-Path -LiteralPath $_ -PathType Leaf})]
-    [string] $OriginalVhdxPath
-)
+A deliberately minimal Windows utility that verifies that a BitLocker-protected
+volume belongs to a previously registered system — based on **observable
+metadata**, not on decryption.
 
-# -------------------------------------------------------------------------
-# Funciones auxiliares
-# -------------------------------------------------------------------------
-function Get-VolumeGuid {
-    param([char]$DriveLetter)
-    # Get‑Volume devuelve la propiedad UniqueId (GUID del volumen)
-    $vol = Get-Volume -DriveLetter $DriveLetter -ErrorAction SilentlyContinue
-    if (-not $vol) { return $null }
-    return $vol.UniqueId
-}
+## What it does
 
-function Show-Info {
-    param([char]$Letter, [string]$Guid)
-    Write-Host "Drive $Letter: GUID = $Guid"
-}
+- Reads the volume `UniqueId` via PowerShell `Get-Volume` (and optionally the
+  BitLocker `Volume ID` from `manage-bde -status`).
+- Computes a SHA-256 fingerprint of that metadata.
+- On `--register`: stores the fingerprint in a local JSON store
+  (`%USERPROFILE%\.volume_verifier\identity_store.json` by default).
+- On verify: recomputes the fingerprint and prints `VERDICT: PASS` or
+  `VERDICT: DENY`.
 
-# -------------------------------------------------------------------------
-# 1️⃣  Preparación – desmontar el VHDX original (si ya está montado)
-# -------------------------------------------------------------------------
-$mountInfo = Get-VHD -Path $OriginalVhdxPath -ErrorAction SilentlyContinue
-if ($mountInfo -and $mountInfo.Attached) {
-    Write-Host "Desmontando VHDX original..."
-    Dismount-VHD -Path $OriginalVhdxPath -Confirm:$false
-}
+```powershell
+# Register a volume (example C:)
+volume-verifier.exe --volume C: --register
 
-# -------------------------------------------------------------------------
-# 2️⃣  Copiar el VHDX
-# -------------------------------------------------------------------------
-$copyPath = [IO.Path]::Combine(
-                [IO.Path]::GetDirectoryName($OriginalVhdxPath),
-                [IO.Path]::GetFileNameWithoutExtension($OriginalVhdxPath) + "_copy.vhdx")
-Write-Host "Copiando VHDX a $copyPath ..."
-Copy-Item -LiteralPath $OriginalVhdxPath -Destination $copyPath -Force
+# Verify a registered volume
+volume-verifier.exe --volume C:
+```
 
-# -------------------------------------------------------------------------
-# 3️⃣  Montar ambas imágenes (original → T:, copia → U:)
-# -------------------------------------------------------------------------
-Write-Host "`nMontando VHDX original como T: ..."
-$origDisk = Mount-VHD -Path $OriginalVhdxPath -PassThru
-$origVol  = $origDisk | Get-Disk | Get-Partition | Where-Object {$_.DriveLetter -eq $null}
-if (-not $origVol) { $origVol = $origDisk | Get-Disk | Initialize-Disk -PartitionStyle GPT -PassThru | `
-                               Get-Partition | Where-Object {$_.DriveLetter -eq $null} }
-Add-PartitionAccessPath -DiskNumber $origDisk.DiskNumber -PartitionNumber $origVol.PartitionNumber -AccessPath 'T:\'
+## What it does NOT do
 
-Write-Host "Montando copia del VHDX como U: ..."
-$copyDisk = Mount-VHD -Path $copyPath -PassThru
-$copyVol  = $copyDisk | Get-Disk | Get-Partition | Where-Object {$_.DriveLetter -eq $null}
-if (-not $copyVol) { $copyVol = $copyDisk | Get-Disk | Initialize-Disk -PartitionStyle GPT -PassThru | `
-                               Get-Partition | Where-Object {$_.DriveLetter -eq $null} }
-Add-PartitionAccessPath -DiskNumber $copyDisk.DiskNumber -PartitionNumber $copyVol.PartitionNumber -AccessPath 'U:\'
+- It does **not** attempt to decrypt, unlock, or read the contents of any
+  volume.
+- It does not modify the volume or its BitLocker state.
+- It does not contact any network service.
+- The only external commands it invokes are `Get-Volume` (PowerShell) and
+  `manage-bde -status` (read-only status query).
 
-# Pequeña pausa para que Windows asigne los GUID
-Start-Sleep -Seconds 2
+## Requirements and conditions
 
-# -------------------------------------------------------------------------
-# 4️⃣  Obtener los GUID (UniqueId) de T: y U:
-# -------------------------------------------------------------------------
-$guidT = Get-VolumeGuid -DriveLetter 'T'
-$guidU = Get-VolumeGuid -DriveLetter 'U'
+- Windows with BitLocker tooling (`manage-bde` available; may require
+  elevation for some queries).
+- Python 3.8+ at runtime if you run from source (standard library only —
+  no pip dependencies). The `.exe` needs nothing but Windows.
+- A previous `--register` must exist for the volume before verification can
+  pass; without a stored fingerprint the verdict is `DENY`.
 
-Show-Info -Letter 'T' -Guid $guidT
-Show-Info -Letter 'U' -Guid $guidU
+## Reproducibility
 
-# -------------------------------------------------------------------------
-# 5️⃣  (Opcional) Registrar / Verificar con la herramienta compilada
-# -------------------------------------------------------------------------
-$verifier = "volume-verifier.exe"   # asume que está en el mismo directorio
-if (-not (Test-Path -LiteralPath $verifier)) {
-    Write-Warning "No se encontró $verifier – se omite la fase de registro/validación."
-} else {
-    # Registrar la unidad T: (si no está ya en el store)
-    Write-Host "`nRegistrando el GUID de T: ..."
-    & $verifier --volume T: --register
+The repository contains the source code used to build the executable:
 
-    # Verificar la copia U:
-    Write-Host "Verificando la copia U: ..."
-    & $verifier --volume U:
-}
+```
+SOURCE ──▶ BUILD ──▶ SHA256 ──▶ EXECUTABLE
+```
 
-# -------------------------------------------------------------------------
-# 6️⃣  Resultado de la prueba
-# -------------------------------------------------------------------------
-if ($guidT -eq $null -or $guidU -eq $null) {
-    Write-Error "No se pudieron obtener los GUID de alguna de las unidades. Revisa que ambas estén correctamente montadas."
-} elseif ($guidT -eq $guidU) {
-    Write-Host "`n=== RESULTADO ==="
-    Write-Host "Los GUID son idénticos → **UniqueId se copia** con el VHDX."
-    Write-Host "Esto significa que el GUID solo prueba continuidad lógica del contenedor, no propiedad física."
-} else {
-    Write-Host "`n=== RESULTADO ==="
-    Write-Host "Los GUID difieren → Windows genera un nuevo UniqueId al montar la copia."
-    Write-Host "En ese caso el GUID sí puede usarse como evidencia de que la unidad es la misma instancia."
-}
+- `source/volume_verifier.py` — the full implementation (231 lines).
+- `build.ps1` — the exact build procedure (PyInstaller `--onefile`), which
+  also prints the SHA-256 of the produced binary.
+- `SHA256SUMS.txt` — hashes of the source files and of the published
+  `volume-verifier.exe`.
+- The `.exe` is provided as a convenience only.
 
-# -------------------------------------------------------------------------
-# 7️⃣  Limpieza (desmontar ambas imágenes)
-# -------------------------------------------------------------------------
-Write-Host "`nDesmontando ambas VHDX..."
-Dismount-VHD -Path $OriginalVhdxPath -Confirm:$false
-Dismount-VHD -Path $copyPath -Confirm:$false
+For maximum transparency, users are encouraged to build the program
+themselves from source and inspect the implementation. See `TESTING.md`
+for the reproduction procedure.
 
-Write-Host "`n¡Prueba completada!"
+**No confíes en la descripción. Reproduce el experimento.**
+
+## Evidence
+
+`evidence/identity-copy-experiment/` documents the experiment performed with
+this tool:
+
+- The `UniqueId` of a VHDX **persists** across detach/attach of the original
+  volume.
+- An exact copy of the VHDX receives a **different** `UniqueId`.
+- The verifier reports `PASS` for the original volume after registration and
+  `DENY` for the copied volume.
+
+This demonstrates the precise claim the tool makes: it proves continuity of
+the same logical volume instance, and detects that a volume is a copy. It
+does not prove physical ownership of hardware.
+
+## Limitations
+
+- The identity is metadata, not hardware: a copied VHDX that kept its
+  `UniqueId` would defeat verification at the metadata level (the experiment
+  showed Windows generates a new one, but that is Windows behavior, not a
+  cryptographic guarantee).
+- BitLocker `Volume ID` is included only if the volume is encrypted and the
+  query succeeds; otherwise the fingerprint relies on `UniqueId` alone.
+- The local JSON store is plain text and not protected: an attacker with
+  write access to the store can re-register. The tool verifies identity, it
+  is not an anti-tamper system.
+
+## Build
+
+```powershell
+# requires Python 3.8+ and PyInstaller
+pip install -r requirements.txt
+./build.ps1
+# prints the SHA-256 of dist/volume-verifier.exe
+```
+
+## Tests
+
+```powershell
+python -m unittest discover tests -v
+```
+
+## License
+
+MIT — see `LICENSE`.
