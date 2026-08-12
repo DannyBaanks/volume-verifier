@@ -1,4 +1,4 @@
-# volume_verifier.py — Volume Identity Verifier v1.1
+# volume_verifier.py — Volume Identity Verifier v1.4
 #
 # PURPOSE
 #   Verify continuity of observable volume metadata for a previously
@@ -8,17 +8,31 @@
 # IDENTITY MODEL
 #   A registered identity has an explicit strength:
 #     WEAK      - observable volume UniqueId only
-#     STANDARD  - UniqueId + BitLocker Volume ID (requires BitLocker metadata)
-#   There is intentionally no STRONG tier: no hardware-backed attestation
-#   exists in this model. A fingerprint is only comparable within the same
-#   platform; the store schema carries the platform for that reason.
+#     STANDARD  - UniqueId + BitLocker Volume ID / LUKS UUID
+#     RAW       - verification-time upgrade: API evidence confirmed by
+#                 independent raw sector reads (--raw). Never stored; the
+#                 entry keeps its registered strength.
+#   There is intentionally no hardware-backed attestation tier beyond RAW:
+#   no hardware-backed attestation exists in this model. A fingerprint is
+#   only comparable within the same platform; the store schema carries the
+#   platform for that reason.
 #
 # SECURITY MODEL
 #   The identity store is protected at rest with Windows DPAPI (per-user,
-#   per-machine) and written atomically. DPAPI prevents casual modification
-#   and accidental corruption from being accepted; it does NOT protect
-#   against an attacker with the same user's privileges, who could simply
-#   re-run --register.
+#   per-machine) or HMAC_PASSPHRASE, and written atomically. DPAPI prevents
+#   casual modification and accidental corruption from being accepted; it
+#   does NOT protect against an attacker with the same user's privileges,
+#   who could simply re-run --register.
+#
+# RAW CORROBORATION (--raw)
+#   Volume Verifier has two independent evidence channels:
+#     API   - OS APIs (Get-Volume, manage-bde, lsblk, cryptsetup)
+#     RAW   - direct sector reads (source/crypto/raw): NTFS VBR serial,
+#             BitLocker FVE volume identifier, LUKS/ext4 UUIDs
+#   --raw is opt-in and requires administrator/root. Both channels must
+#   agree: a conflict is DENY EVIDENCE_CONFLICT (never a silent pass), and
+#   a confirmed match upgrades the verdict to RAW strength. Failure to
+#   acquire raw evidence is an explicit ERROR, never a silent fallback.
 #
 # NO SILENT FALLBACK
 #   Every external query is classified explicitly. A failure to acquire
@@ -26,18 +40,21 @@
 #   an ERROR with a REASON code.
 #
 # PLATFORM
-#   Windows only (PowerShell Get-Volume + manage-bde). Other platforms are
-#   rejected with UNSUPPORTED_PLATFORM. Platform-specific evidence sources
-#   for Linux/macOS are a documented roadmap, not implemented here.
+#   Windows (PowerShell Get-Volume + manage-bde) and Linux (findmnt + lsblk
+#   + cryptsetup, no root). Other platforms are rejected with
+#   UNSUPPORTED_PLATFORM. Platform-specific evidence sources for macOS are
+#   a documented roadmap, not implemented here.
 #
 # EXIT CODES
 #   0 = PASS          1 = DENY         2 = ERROR
 #
 # Command-line usage:
-#   volume-verifier.exe --volume C: [--store <path>] [--register]
+#   volume-verifier.exe --volume C: [--store <path>] [--register] [--raw]
+#   volume-verifier.exe --volume /mnt/data [--store <path>] [--register] [--raw]
 
 import argparse
 import base64
+import binascii
 import ctypes
 import hashlib
 import hmac
@@ -51,7 +68,9 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 from ctypes import wintypes
 
-VERSION = "1.3.0"
+from crypto import raw as crypto_raw
+
+VERSION = "1.4.0"
 STORE_FORMAT_VERSION = 2
 CMD_TIMEOUT = 15
 SUPPORTED_PLATFORM = "win32"
@@ -78,9 +97,13 @@ R_STORE_MAC_MISMATCH = "STORE_MAC_MISMATCH"
 R_NOT_REGISTERED = "NOT_REGISTERED"
 R_FINGERPRINT_MISMATCH = "FINGERPRINT_MISMATCH"
 R_MATCHED = "MATCHED_REGISTERED_IDENTITY"
+R_RAW_READ_FAILED = "RAW_READ_FAILED"
+R_RAW_INSUFFICIENT_PRIVILEGES = "RAW_INSUFFICIENT_PRIVILEGES"
+R_EVIDENCE_CONFLICT = "EVIDENCE_CONFLICT"
 
 STRENGTH_WEAK = "WEAK"
 STRENGTH_STANDARD = "STANDARD"
+STRENGTH_RAW = "RAW"
 
 _ENTRY_FIELDS = {
     "unique_id": (str,),
@@ -89,6 +112,16 @@ _ENTRY_FIELDS = {
     "platform": (str,),
     "fingerprint": (str,),
     "registered_at": (str,),
+}
+
+# Optional evidence fields recorded by --register --raw. Pre-v1.4 entries
+# (and stores written without raw capture) legitimately lack them; they are
+# validated only when present.
+_ENTRY_OPTIONAL_FIELDS = {
+    "raw_ntfs_serial": (str, type(None)),
+    "raw_fve_guid": (str, type(None)),
+    "raw_luks_uuid": (str, type(None)),
+    "raw_ext4_uuid": (str, type(None)),
 }
 
 
@@ -407,6 +440,24 @@ def _query_linux_fs_uuid(volume: str) -> str:
     return uuid
 
 
+def _linux_backing_device(device: str) -> str:
+    """Resolve the backing device for an opened device-mapper target (LUKS).
+
+    `cryptsetup status /dev/mapper/<name>` prints "  device:  /dev/loopN";
+    that backing device is where the LUKS header and the filesystem live.
+    Plain block devices are returned unchanged.
+    """
+    if not device.startswith("/dev/mapper/"):
+        return device
+    status = _linux_cmd_silent(["cryptsetup", "status", device])
+    for line in status.splitlines():
+        if line.strip().lower().startswith("device:"):
+            candidate = line.split(":", 1)[1].strip()
+            if candidate.startswith("/dev/"):
+                return candidate
+    return device
+
+
 def _query_linux_disk_serial(volume: str) -> Optional[str]:
     """SCSI/WWN serial of the parent disk. Extra observation; not part of
     the canonical fingerprint. Returns None when the disk has no serial
@@ -421,15 +472,7 @@ def _query_linux_disk_serial(volume: str) -> Optional[str]:
         device = _linux_resolve_device(volume)
     except VerifierError:
         return None
-    target = device
-    if device.startswith("/dev/mapper/"):
-        status = _linux_cmd_silent(["cryptsetup", "status", device])
-        for line in status.splitlines():
-            if line.strip().lower().startswith("device:"):
-                candidate = line.split(":", 1)[1].strip()
-                if candidate.startswith("/dev/"):
-                    target = candidate
-                break
+    target = _linux_backing_device(device)
     if not target.startswith("/dev/"):
         return None
     name = target[len("/dev/"):]
@@ -462,15 +505,7 @@ def _query_linux_luks_uuid(volume: str) -> Optional[str]:
         device = _linux_resolve_device(volume)
     except VerifierError:
         return None
-    target = device
-    if device.startswith("/dev/mapper/"):
-        status = _linux_cmd_silent(["cryptsetup", "status", device])
-        for line in status.splitlines():
-            if line.strip().lower().startswith("device:"):
-                candidate = line.split(":", 1)[1].strip()
-                if candidate.startswith("/dev/"):
-                    target = candidate
-                break
+    target = _linux_backing_device(device)
     try:
         proc = subprocess.run(
             ["cryptsetup", "luksUUID", target],
@@ -492,6 +527,192 @@ def _linux_cmd_silent(cmd: list) -> str:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return ""
     return proc.stdout or ""
+
+
+# ---------------------------------------------------------------------------
+# Raw evidence acquisition (--raw corroboration channel)
+#
+# Independent of the API channel: direct sector reads via crypto.raw.
+#   Windows: NTFS VBR serial from \\.\X: ; BitLocker FVE volume identifier
+#            from the physical disk at the partition offset (raw sector 0
+#            holds the FVE header in the clear, locked or unlocked).
+#   Linux:   LUKS UUID and ext4 UUID read from the backing block device.
+# Requires administrator/root. Every failure maps to an explicit
+# RAW_READ_FAILED / RAW_INSUFFICIENT_PRIVILEGES error; "this filesystem
+# type has no such identifier" is honest absence (None), never an error.
+# ---------------------------------------------------------------------------
+
+def _raw_to_verifier(e: crypto_raw.RawError, what: str) -> VerifierError:
+    """Map a RawError to an explicit RAW_* VerifierError."""
+    if e.reason == crypto_raw.R_INSUFFICIENT_PRIVILEGES:
+        return VerifierError(
+            R_RAW_INSUFFICIENT_PRIVILEGES,
+            f"raw {what}: {e.detail or e.reason}",
+        )
+    return VerifierError(
+        R_RAW_READ_FAILED, f"raw {what}: {e.detail or e.reason}"
+    )
+
+
+def _raw_windows_partition(letter: str) -> Tuple[int, int]:
+    """Return (disk_number, byte_offset) for a drive letter via Get-Partition.
+
+    Raw reads of the FVE header need the physical disk and the partition
+    offset; the volume device only exposes the decrypted view.
+    """
+    def _field(expr: str) -> str:
+        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", expr]
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=CMD_TIMEOUT
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            raise VerifierError(
+                R_RAW_READ_FAILED, "cannot resolve partition (powershell unavailable)"
+            ) from None
+        value = (proc.stdout or "").strip()
+        if proc.returncode != 0 or not value:
+            raise VerifierError(
+                R_RAW_READ_FAILED,
+                f"cannot resolve partition for '{letter}:' (needs administrator)",
+            )
+        return value
+
+    disk = _field(f"(Get-Partition -DriveLetter {letter} | Select-Object -ExpandProperty DiskNumber)")
+    offset = _field(f"(Get-Partition -DriveLetter {letter} | Select-Object -ExpandProperty Offset)")
+    if not disk.isdigit() or not offset.isdigit():
+        raise VerifierError(
+            R_RAW_READ_FAILED,
+            f"cannot resolve partition for '{letter}:' (needs administrator)",
+        )
+    return int(disk), int(offset)
+
+
+def _raw_observations_windows(volume: str) -> dict:
+    """Capture raw evidence for a Windows volume (requires administrator)."""
+    letter, _ = _normalize_volume(volume)
+
+    serial = None
+    try:
+        serial = crypto_raw.read_ntfs_volume_serial(rf"\\.\{letter}:", 0)
+    except crypto_raw.RawError as e:
+        if e.reason != crypto_raw.R_UNSUPPORTED_FS:
+            raise _raw_to_verifier(e, "NTFS serial") from None
+
+    disk, offset = _raw_windows_partition(letter)
+    guid = None
+    try:
+        guid = crypto_raw.read_bitlocker_volume_id(
+            rf"\\.\PhysicalDrive{disk}", offset // 512
+        )
+    except crypto_raw.RawError as e:
+        if e.reason != crypto_raw.R_VOLUME_QUERY_FAILED or "not found" not in e.detail:
+            raise _raw_to_verifier(e, "BitLocker volume ID") from None
+
+    return {
+        "raw_ntfs_serial": f"{serial:X}" if serial is not None else None,
+        "raw_fve_guid": guid,
+    }
+
+
+def _raw_observations_linux(volume: str) -> dict:
+    """Capture raw evidence for a Linux volume (requires root)."""
+    device = _linux_resolve_device(volume)
+    target = _linux_backing_device(device)
+
+    luks_uuid = None
+    try:
+        luks_uuid = crypto_raw.read_luks_uuid(target)
+    except crypto_raw.RawError as e:
+        if e.reason != crypto_raw.R_INVALID_SIGNATURE:
+            raise _raw_to_verifier(e, "LUKS UUID") from None
+
+    ext4_uuid = None
+    try:
+        ext4_uuid = crypto_raw.read_ext4_uuid(target, 0)
+    except crypto_raw.RawError as e:
+        if e.reason != crypto_raw.R_UNSUPPORTED_FS:
+            raise _raw_to_verifier(e, "ext4 UUID") from None
+
+    return {"raw_luks_uuid": luks_uuid, "raw_ext4_uuid": ext4_uuid}
+
+
+def _raw_observations(volume: str) -> dict:
+    """Capture raw evidence for the running platform. Raises VerifierError."""
+    if _platform() == SUPPORTED_PLATFORM:
+        return _raw_observations_windows(volume)
+    return _raw_observations_linux(volume)
+
+
+def _canonical_guid(value: str) -> str:
+    """Normalize a GUID string for comparison (braces, hyphens, case)."""
+    return value.strip().strip("{}").replace("-", "").upper()
+
+
+def _corroborate(entry: dict, obs: VolumeObservations, raw_obs: dict) -> Tuple[bool, bool]:
+    """Cross-check raw sector evidence against API evidence and the entry.
+
+    Returns (conflict, corroborated):
+      conflict      - raw evidence contradicts API evidence or the registered
+                      entry (EVIDENCE_CONFLICT)
+      corroborated  - at least one independent comparison agreed (RAW strength)
+
+    Registered raw fields are optional: pre-v1.4 entries legitimately lack
+    them, and raw-to-API comparison still works for those entries.
+    """
+    conflict = False
+    corroborated = False
+
+    if obs.platform == "win32":
+        entry_serial = entry.get("raw_ntfs_serial")
+        if entry_serial is not None:
+            if raw_obs.get("raw_ntfs_serial") == entry_serial:
+                corroborated = True
+            else:
+                conflict = True
+        api_bid = obs.bitlocker_id
+        raw_guid = raw_obs.get("raw_fve_guid")
+        if api_bid:
+            if raw_guid is None:
+                conflict = True  # API says BitLocker, no FVE header on disk
+            elif _canonical_guid(raw_guid) == _canonical_guid(api_bid):
+                corroborated = True
+            else:
+                conflict = True
+        elif raw_guid is not None:
+            conflict = True  # API says no BitLocker, FVE header found
+        return conflict, corroborated
+
+    api_luks = obs.bitlocker_id
+    raw_luks = raw_obs.get("raw_luks_uuid")
+    if api_luks:
+        if raw_luks is None:
+            conflict = True  # API says LUKS, no LUKS header on disk
+        elif raw_luks.lower() == api_luks.lower():
+            corroborated = True
+        else:
+            conflict = True
+    else:
+        api_fs = obs.unique_id
+        raw_ext4 = raw_obs.get("raw_ext4_uuid")
+        if raw_ext4 is not None:
+            if raw_ext4.lower() == api_fs.lower():
+                corroborated = True
+            else:
+                conflict = True
+    entry_luks = entry.get("raw_luks_uuid")
+    if entry_luks is not None:
+        if raw_luks == entry_luks:
+            corroborated = True
+        else:
+            conflict = True
+    entry_ext4 = entry.get("raw_ext4_uuid")
+    if entry_ext4 is not None:
+        if raw_ext4 == entry_ext4:
+            corroborated = True
+        else:
+            conflict = True
+    return conflict, corroborated
 
 
 # ---------------------------------------------------------------------------
@@ -665,7 +886,11 @@ def _load_store(
         if not isinstance(entries_b64, str):
             raise VerifierError(R_STORE_CORRUPTED, "store missing entries_b64")
         try:
-            payload = _dpapi_unprotect(base64.b64decode(entries_b64.encode("ascii")))
+            payload = _dpapi_unprotect(
+                base64.b64decode(entries_b64.encode("ascii"), validate=True)
+            )
+        except (binascii.Error, ValueError):
+            raise VerifierError(R_STORE_CORRUPTED, "store payload is not valid base64") from None
         except VerifierError as e:
             raise VerifierError(
                 R_STORE_CORRUPTED, f"store payload cannot be decrypted ({e.reason})"
@@ -684,11 +909,11 @@ def _load_store(
                 "(or VOLUME_VERIFIER_PASSPHRASE)",
             )
         try:
-            salt = base64.b64decode(kdf["salt_b64"].encode("ascii"))
+            salt = base64.b64decode(kdf["salt_b64"].encode("ascii"), validate=True)
             iterations = int(kdf["iterations"])
-            stored_mac = base64.b64decode(mac_b64.encode("ascii"))
-            payload = base64.b64decode(payload_b64.encode("ascii"))
-        except (KeyError, ValueError):
+            stored_mac = base64.b64decode(mac_b64.encode("ascii"), validate=True)
+            payload = base64.b64decode(payload_b64.encode("ascii"), validate=True)
+        except (KeyError, ValueError, binascii.Error):
             raise VerifierError(R_STORE_CORRUPTED, "store HMAC fields are invalid") from None
         key = _hmac_key(passphrase, salt, iterations)
         if not hmac.compare_digest(
@@ -721,6 +946,11 @@ def _validate_entry(key: str, entry: object) -> None:
         raise VerifierError(R_STORE_CORRUPTED, f"entry '{key}' is not an object")
     for field, types in _ENTRY_FIELDS.items():
         if field not in entry or not isinstance(entry[field], types):
+            raise VerifierError(
+                R_STORE_CORRUPTED, f"entry '{key}' has invalid field '{field}'"
+            )
+    for field, types in _ENTRY_OPTIONAL_FIELDS.items():
+        if field in entry and not isinstance(entry[field], types):
             raise VerifierError(
                 R_STORE_CORRUPTED, f"entry '{key}' has invalid field '{field}'"
             )
@@ -785,7 +1015,7 @@ def _save_store(path: Path, entries: Dict[str, dict], passphrase: Optional[str] 
 # ---------------------------------------------------------------------------
 
 def register_volume(
-    volume: str, store_path: Path, passphrase: Optional[str] = None
+    volume: str, store_path: Path, passphrase: Optional[str] = None, raw: bool = False
 ) -> dict:
     """Record the current observable identity of ``volume``.
 
@@ -798,6 +1028,10 @@ def register_volume(
     passphrase is provided. Providing a passphrase on a DPAPI store
     deterministically re-protects it (entries preserved). Never stores or
     derives BitLocker keys.
+
+    With ``raw=True`` the entry also records raw sector evidence
+    (NTFS serial / FVE GUID on Windows, LUKS / ext4 UUIDs on Linux) for
+    later --raw corroboration. Raw capture failure fails the registration.
 
     Returns the created entry. Raises VerifierError on failure.
     """
@@ -824,6 +1058,8 @@ def register_volume(
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z"),
     }
+    if raw:
+        entry.update(_raw_observations(volume))
     entries[key] = entry
     _save_store(store_path, entries, passphrase)
     return entry
@@ -855,9 +1091,17 @@ def _load_store_for_register(
 
 
 def verify_volume(
-    volume: str, store_path: Path, passphrase: Optional[str] = None
+    volume: str,
+    store_path: Path,
+    passphrase: Optional[str] = None,
+    raw: bool = False,
 ) -> Verdict:
     """Verify ``volume`` against the registered identity.
+
+    With ``raw=True`` the API fingerprint match is additionally cross-checked
+    against independent raw sector reads: a confirmed match upgrades the
+    verdict to RAW strength, a disagreement is DENY EVIDENCE_CONFLICT, and a
+    raw acquisition failure is an explicit ERROR.
 
     Never raises for operational problems: everything is classified into a
     Verdict (PASS / DENY / ERROR + REASON).
@@ -893,9 +1137,19 @@ def verify_volume(
         else:
             current_fp = _fingerprint(observations.unique_id)
 
-        if current_fp == entry["fingerprint"]:
+        if current_fp != entry["fingerprint"]:
+            return Verdict("DENY", R_FINGERPRINT_MISMATCH, strength)
+
+        if not raw:
             return Verdict("PASS", R_MATCHED, strength)
-        return Verdict("DENY", R_FINGERPRINT_MISMATCH, strength)
+
+        raw_obs = _raw_observations(volume)
+        conflict, corroborated = _corroborate(entry, observations, raw_obs)
+        if conflict:
+            return Verdict("DENY", R_EVIDENCE_CONFLICT, strength)
+        if corroborated:
+            return Verdict("PASS", R_MATCHED, STRENGTH_RAW)
+        return Verdict("PASS", R_MATCHED, strength)
     except VerifierError as e:
         return Verdict("ERROR", e.reason)
 
@@ -914,7 +1168,11 @@ def _parse_args() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
-    parser.add_argument("--volume", required=True, help="Drive letter (e.g., C:)")
+    parser.add_argument(
+        "--volume",
+        required=True,
+        help="Drive letter (e.g., C:) or Linux mountpoint (e.g., /mnt/data)",
+    )
     parser.add_argument(
         "--store",
         default=str(Path.home() / ".volume_verifier" / "identity_store.json"),
@@ -931,6 +1189,14 @@ def _parse_args() -> argparse.Namespace:
         "--register",
         action="store_true",
         help="Record the current fingerprint instead of verifying.",
+    )
+    parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="Corroborate evidence with independent raw sector reads "
+        "(requires administrator/root). On --register the raw identifiers "
+        "are recorded; on verify a confirmed match upgrades the verdict to "
+        "RAW strength and a disagreement is DENY EVIDENCE_CONFLICT.",
     )
     return parser.parse_args()
 
@@ -949,13 +1215,15 @@ def main() -> None:
 
     if args.register:
         try:
-            entry = register_volume(args.volume, store_path, passphrase)
+            entry = register_volume(args.volume, store_path, passphrase, raw=args.raw)
             vol_display = args.volume.upper() if entry["platform"] == "win32" else args.volume
             print(
                 f"[VERIFIER] Registered {entry['platform']} volume "
                 f"{vol_display} "
                 f"(identity_strength={entry['identity_strength']})."
             )
+            if args.raw:
+                print("[VERIFIER] Raw sector evidence recorded for corroboration.")
             sys.exit(EXIT_PASS)
         except VerifierError as e:
             verdict = Verdict("ERROR", e.reason)
@@ -963,7 +1231,7 @@ def main() -> None:
             print(f"MESSAGE: {e.message}")
             sys.exit(verdict.exit_code)
     else:
-        verdict = verify_volume(args.volume, store_path, passphrase)
+        verdict = verify_volume(args.volume, store_path, passphrase, raw=args.raw)
         print(verdict.format())
         sys.exit(verdict.exit_code)
 

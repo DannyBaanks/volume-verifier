@@ -1,0 +1,14 @@
+﻿v1.4 raw corroboration (--raw) - TEST RESULTS
+python.exe : ..........................................................................................................
+.......................
+En línea: 1 Carácter: 189
++ ...  "$ev\01-tests.txt"; & python -m unittest discover tests 2>&1 | Out-F ...
++                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (.................................:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+----------------------------------------------------------------------
+Ran 129 tests in 2.665s
+
+OK
+EXIT=0

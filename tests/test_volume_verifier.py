@@ -211,6 +211,43 @@ class TestStoreSchema(unittest.TestCase):
                 vv._load_store(p)
             self.assertEqual(ctx.exception.reason, "STORE_CORRUPTED")
 
+    def test_optional_raw_fields_accepted(self):
+        with tempfile.TemporaryDirectory() as d:
+            entries = {
+                "C:": {
+                    "unique_id": UID_ORIGINAL,
+                    "bitlocker_id": None,
+                    "identity_strength": "WEAK",
+                    "platform": "win32",
+                    "fingerprint": vv._fingerprint(UID_ORIGINAL),
+                    "registered_at": "2026-08-11T00:00:00Z",
+                    "raw_ntfs_serial": "123456789ABCDEF0",
+                    "raw_fve_guid": None,
+                }
+            }
+            p = self._write(d, _make_store_file(entries))
+            loaded = vv._load_store(p)
+            self.assertEqual(loaded["C:"]["raw_ntfs_serial"], "123456789ABCDEF0")
+            self.assertIsNone(loaded["C:"]["raw_fve_guid"])
+
+    def test_bad_raw_field_is_corrupt(self):
+        with tempfile.TemporaryDirectory() as d:
+            entries = {
+                "C:": {
+                    "unique_id": UID_ORIGINAL,
+                    "bitlocker_id": None,
+                    "identity_strength": "WEAK",
+                    "platform": "win32",
+                    "fingerprint": vv._fingerprint(UID_ORIGINAL),
+                    "registered_at": "2026-08-11T00:00:00Z",
+                    "raw_ntfs_serial": 123,  # wrong type
+                }
+            }
+            p = self._write(d, _make_store_file(entries))
+            with self.assertRaises(vv.VerifierError) as ctx:
+                vv._load_store(p)
+            self.assertEqual(ctx.exception.reason, "STORE_CORRUPTED")
+
 
 @unittest.skipUnless(sys.platform == "win32", "DPAPI is Windows-only")
 class TestDpapi(unittest.TestCase):
@@ -688,6 +725,283 @@ class TestLinuxSource(unittest.TestCase):
             verdict = vv.verify_volume(LINUX_MOUNTPOINT, p, passphrase="k1")
             self.assertEqual(verdict.outcome, "DENY")
             self.assertEqual(verdict.reason, "FINGERPRINT_MISMATCH")
+
+
+class TestRawCorroborationWindows(unittest.TestCase):
+    """--raw corroboration: API evidence vs raw sector evidence (Windows)."""
+
+    def _path(self, d):
+        return Path(d) / "store.json"
+
+    RAW_SERIAL = "123456789ABCDEF0"
+    RAW_GUID = "12345678-1234-1234-1234-1234567890AB"  # canonical form of BID_ORIGINAL
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=BID_ORIGINAL)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_raw_standard_guid_corroborated_is_raw_strength(self, _uid, _bid):
+        with tempfile.TemporaryDirectory() as d:
+            vv.register_volume("C:", self._path(d))
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_ntfs_serial": self.RAW_SERIAL,
+                "raw_fve_guid": self.RAW_GUID,
+            }):
+                v = vv.verify_volume("C:", self._path(d), raw=True)
+            self.assertEqual(v.outcome, "PASS")
+            self.assertEqual(v.reason, "MATCHED_REGISTERED_IDENTITY")
+            self.assertEqual(v.strength, "RAW")
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=BID_ORIGINAL)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_raw_standard_guid_mismatch_is_evidence_conflict(self, _uid, _bid):
+        with tempfile.TemporaryDirectory() as d:
+            vv.register_volume("C:", self._path(d))
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_ntfs_serial": None,
+                "raw_fve_guid": "DEADBEEF-0000-0000-0000-000000000000",
+            }):
+                v = vv.verify_volume("C:", self._path(d), raw=True)
+            self.assertEqual(v.outcome, "DENY")
+            self.assertEqual(v.reason, "EVIDENCE_CONFLICT")
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=BID_ORIGINAL)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_raw_standard_fve_header_missing_is_evidence_conflict(self, _uid, _bid):
+        """API says BitLocker but no FVE header on disk: conflict, not pass."""
+        with tempfile.TemporaryDirectory() as d:
+            vv.register_volume("C:", self._path(d))
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_ntfs_serial": None,
+                "raw_fve_guid": None,
+            }):
+                v = vv.verify_volume("C:", self._path(d), raw=True)
+            self.assertEqual(v.outcome, "DENY")
+            self.assertEqual(v.reason, "EVIDENCE_CONFLICT")
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=None)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_raw_weak_ntfs_continuity_pass(self, _uid, _bid):
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_ntfs_serial": self.RAW_SERIAL,
+                "raw_fve_guid": None,
+            }):
+                entry = vv.register_volume("C:", self._path(d), raw=True)
+                self.assertEqual(entry["raw_ntfs_serial"], self.RAW_SERIAL)
+                self.assertIsNone(entry["raw_fve_guid"])
+                v = vv.verify_volume("C:", self._path(d), raw=True)
+            self.assertEqual(v.outcome, "PASS")
+            self.assertEqual(v.strength, "RAW")
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=None)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_raw_weak_ntfs_continuity_conflict(self, _uid, _bid):
+        """Registered raw NTFS serial differs from the current one: conflict."""
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch("volume_verifier._raw_observations", side_effect=[
+                {"raw_ntfs_serial": self.RAW_SERIAL, "raw_fve_guid": None},   # register
+                {"raw_ntfs_serial": "0000000000000000", "raw_fve_guid": None},  # verify
+            ]):
+                vv.register_volume("C:", self._path(d), raw=True)
+                v = vv.verify_volume("C:", self._path(d), raw=True)
+            self.assertEqual(v.outcome, "DENY")
+            self.assertEqual(v.reason, "EVIDENCE_CONFLICT")
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=None)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_raw_weak_unexpected_fve_is_conflict(self, _uid, _bid):
+        """API says no BitLocker but an FVE header exists on disk: conflict."""
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_ntfs_serial": None,
+                "raw_fve_guid": "11111111-2222-3333-4444-555555555555",
+            }):
+                vv.register_volume("C:", self._path(d))
+                v = vv.verify_volume("C:", self._path(d), raw=True)
+            self.assertEqual(v.outcome, "DENY")
+            self.assertEqual(v.reason, "EVIDENCE_CONFLICT")
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=None)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_raw_privileges_error_is_explicit(self, _uid, _bid):
+        with tempfile.TemporaryDirectory() as d:
+            vv.register_volume("C:", self._path(d))
+            with mock.patch("volume_verifier._raw_observations",
+                            side_effect=vv.VerifierError(
+                                "RAW_INSUFFICIENT_PRIVILEGES",
+                                "raw NTFS serial: cannot open \\.\C:",
+                            )):
+                v = vv.verify_volume("C:", self._path(d), raw=True)
+            self.assertEqual(v.outcome, "ERROR")
+            self.assertEqual(v.reason, "RAW_INSUFFICIENT_PRIVILEGES")
+            self.assertEqual(v.exit_code, vv.EXIT_ERROR)
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=None)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_raw_read_failed_error(self, _uid, _bid):
+        with tempfile.TemporaryDirectory() as d:
+            vv.register_volume("C:", self._path(d))
+            with mock.patch("volume_verifier._raw_observations",
+                            side_effect=vv.VerifierError("RAW_READ_FAILED", "I/O")):
+                v = vv.verify_volume("C:", self._path(d), raw=True)
+            self.assertEqual(v.outcome, "ERROR")
+            self.assertEqual(v.reason, "RAW_READ_FAILED")
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=None)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_legacy_weak_entry_verifies_raw_without_conflict(self, _uid, _bid):
+        """Pre-v1.4 entries have no raw fields; raw read adds no comparison
+        and must not fail the verification."""
+        with tempfile.TemporaryDirectory() as d:
+            entries = {
+                "C:": {
+                    "unique_id": UID_ORIGINAL,
+                    "bitlocker_id": None,
+                    "identity_strength": "WEAK",
+                    "platform": "win32",
+                    "fingerprint": vv._fingerprint(UID_ORIGINAL),
+                    "registered_at": "2026-08-11T00:00:00Z",
+                }
+            }
+            self._path(d).write_bytes(_make_store_file(entries))
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_ntfs_serial": self.RAW_SERIAL,
+                "raw_fve_guid": None,
+            }):
+                v = vv.verify_volume("C:", self._path(d), raw=True)
+            self.assertEqual(v.outcome, "PASS")
+            self.assertEqual(v.strength, "WEAK")
+
+    @mock.patch("volume_verifier._query_bitlocker", return_value=BID_ORIGINAL)
+    @mock.patch("volume_verifier._query_unique_id", return_value=UID_ORIGINAL)
+    def test_raw_off_never_touches_raw_channel(self, _uid, _bid):
+        with tempfile.TemporaryDirectory() as d:
+            vv.register_volume("C:", self._path(d))
+            with mock.patch("volume_verifier._raw_observations") as raw_mock:
+                v = vv.verify_volume("C:", self._path(d), raw=False)
+            raw_mock.assert_not_called()
+            self.assertEqual(v.outcome, "PASS")
+            self.assertEqual(v.strength, "STANDARD")
+
+    @mock.patch("volume_verifier._query_bitlocker", side_effect=[BID_ORIGINAL, BID_ORIGINAL])
+    @mock.patch("volume_verifier._query_unique_id", side_effect=[UID_ORIGINAL, UID_COPY])
+    def test_raw_fingerprint_mismatch_still_denies_first(self, _uid, _bid):
+        """A fingerprint mismatch is DENY before raw corroboration runs."""
+        with tempfile.TemporaryDirectory() as d:
+            vv.register_volume("T:", self._path(d))
+            with mock.patch("volume_verifier._raw_observations") as raw_mock:
+                v = vv.verify_volume("T:", self._path(d), raw=True)
+            raw_mock.assert_not_called()
+            self.assertEqual(v.outcome, "DENY")
+            self.assertEqual(v.reason, "FINGERPRINT_MISMATCH")
+
+
+class TestRawCorroborationLinux(unittest.TestCase):
+    """--raw corroboration on Linux (LUKS UUID / ext4 UUID)."""
+
+    def _store_path(self, d):
+        return Path(d) / "store.json"
+
+    @mock.patch("volume_verifier._query_linux_disk_serial", return_value=LINUX_DISK_SERIAL)
+    @mock.patch("volume_verifier._query_linux_luks_uuid", return_value=LINUX_LUKS_UUID)
+    @mock.patch("volume_verifier._query_linux_fs_uuid", return_value=LINUX_FS_UUID)
+    @mock.patch("volume_verifier._platform", return_value="linux")
+    def test_linux_raw_luks_corroborated_is_raw_strength(self, _p, _u, _b, _s):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._store_path(d)
+            vv.register_volume(LINUX_MOUNTPOINT, p, passphrase="k1")
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_luks_uuid": LINUX_LUKS_UUID,
+                "raw_ext4_uuid": None,
+            }):
+                v = vv.verify_volume(LINUX_MOUNTPOINT, p, passphrase="k1", raw=True)
+            self.assertEqual(v.outcome, "PASS")
+            self.assertEqual(v.strength, "RAW")
+
+    @mock.patch("volume_verifier._query_linux_disk_serial", return_value=LINUX_DISK_SERIAL)
+    @mock.patch("volume_verifier._query_linux_luks_uuid", return_value=LINUX_LUKS_UUID)
+    @mock.patch("volume_verifier._query_linux_fs_uuid", return_value=LINUX_FS_UUID)
+    @mock.patch("volume_verifier._platform", return_value="linux")
+    def test_linux_raw_luks_conflict(self, _p, _u, _b, _s):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._store_path(d)
+            vv.register_volume(LINUX_MOUNTPOINT, p, passphrase="k1")
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_luks_uuid": "11111111-2222-3333-4444-555555555555",
+                "raw_ext4_uuid": None,
+            }):
+                v = vv.verify_volume(LINUX_MOUNTPOINT, p, passphrase="k1", raw=True)
+            self.assertEqual(v.outcome, "DENY")
+            self.assertEqual(v.reason, "EVIDENCE_CONFLICT")
+
+    @mock.patch("volume_verifier._query_linux_disk_serial", return_value=None)
+    @mock.patch("volume_verifier._query_linux_luks_uuid", return_value=LINUX_LUKS_UUID)
+    @mock.patch("volume_verifier._query_linux_fs_uuid", return_value=LINUX_FS_UUID)
+    @mock.patch("volume_verifier._platform", return_value="linux")
+    def test_linux_raw_luks_missing_but_api_says_luks_is_conflict(self, _p, _u, _b, _s):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._store_path(d)
+            vv.register_volume(LINUX_MOUNTPOINT, p, passphrase="k1")
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_luks_uuid": None,  # no LUKS header found on disk
+                "raw_ext4_uuid": None,
+            }):
+                v = vv.verify_volume(LINUX_MOUNTPOINT, p, passphrase="k1", raw=True)
+            self.assertEqual(v.outcome, "DENY")
+            self.assertEqual(v.reason, "EVIDENCE_CONFLICT")
+
+    @mock.patch("volume_verifier._query_linux_disk_serial", return_value=None)
+    @mock.patch("volume_verifier._query_linux_luks_uuid", return_value=None)
+    @mock.patch("volume_verifier._query_linux_fs_uuid", return_value=LINUX_FS_UUID)
+    @mock.patch("volume_verifier._platform", return_value="linux")
+    def test_linux_raw_ext4_corroborated(self, _p, _u, _b, _s):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._store_path(d)
+            vv.register_volume(LINUX_MOUNTPOINT, p, passphrase="k1")
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_luks_uuid": None,
+                "raw_ext4_uuid": LINUX_FS_UUID,
+            }):
+                v = vv.verify_volume(LINUX_MOUNTPOINT, p, passphrase="k1", raw=True)
+            self.assertEqual(v.outcome, "PASS")
+            self.assertEqual(v.strength, "RAW")
+
+    @mock.patch("volume_verifier._query_linux_disk_serial", return_value=None)
+    @mock.patch("volume_verifier._query_linux_luks_uuid", return_value=None)
+    @mock.patch("volume_verifier._query_linux_fs_uuid", return_value=LINUX_FS_UUID)
+    @mock.patch("volume_verifier._platform", return_value="linux")
+    def test_linux_raw_ext4_conflict(self, _p, _u, _b, _s):
+        with tempfile.TemporaryDirectory() as d:
+            p = self._store_path(d)
+            vv.register_volume(LINUX_MOUNTPOINT, p, passphrase="k1")
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_luks_uuid": None,
+                "raw_ext4_uuid": "99999999-0000-0000-0000-000000000000",
+            }):
+                v = vv.verify_volume(LINUX_MOUNTPOINT, p, passphrase="k1", raw=True)
+            self.assertEqual(v.outcome, "DENY")
+            self.assertEqual(v.reason, "EVIDENCE_CONFLICT")
+
+    @mock.patch("volume_verifier._query_linux_disk_serial", return_value=None)
+    @mock.patch("volume_verifier._query_linux_luks_uuid", return_value=LINUX_LUKS_UUID)
+    @mock.patch("volume_verifier._query_linux_fs_uuid", return_value=LINUX_FS_UUID)
+    @mock.patch("volume_verifier._platform", return_value="linux")
+    def test_linux_raw_registered_luks_continuity_conflict(self, _p, _u, _b, _s):
+        """Registered raw LUKS UUID differs from the current one: conflict
+        even when the API LUKS UUID still matches."""
+        with tempfile.TemporaryDirectory() as d:
+            p = self._store_path(d)
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_luks_uuid": LINUX_LUKS_UUID,
+                "raw_ext4_uuid": None,
+            }):
+                vv.register_volume(LINUX_MOUNTPOINT, p, passphrase="k1", raw=True)
+            with mock.patch("volume_verifier._raw_observations", return_value={
+                "raw_luks_uuid": "11111111-2222-3333-4444-555555555555",
+                "raw_ext4_uuid": None,
+            }):
+                v = vv.verify_volume(LINUX_MOUNTPOINT, p, passphrase="k1", raw=True)
+            self.assertEqual(v.outcome, "DENY")
+            self.assertEqual(v.reason, "EVIDENCE_CONFLICT")
 
 
 if __name__ == "__main__":

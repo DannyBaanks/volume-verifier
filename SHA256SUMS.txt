@@ -4,12 +4,13 @@
 # Rebuild from source and compare behavior (see TESTING.md).
 #
 # SHA-256 of the published binary (volume-verifier.exe):
-f81d3263e1847deaadd7a178fffbd7131ed2ae5f6ae6b29bad5783bc47c73bf4  volume-verifier.exe
+cc1cbe2ebc598a6d03469dc7320398d24887df3eac637322fb9531b8dcc20029  volume-verifier.exe
 
 # NOTE: PyInstaller embeds build metadata (timestamps, versions), so a fresh
 # build is NOT byte-for-byte identical to the published binary. Verify by
 # rebuilding and comparing behavior, not by comparing hashes.
 # Reference builds (same source, documented in evidence/):
+# cc1cbe2ebc598a6d03469dc7320398d24887df3eac637322fb9531b8dcc20029  (v1.4.0)
 # 31584d106cf7885f6c10885f7f73810c8fa39210896e287c5cd008bf6802cd5a  (v1.3.0 first build)
 # 8558efcf7d2a0e64a751da51c2d864a62f8624ff520a9b633891b091ea7746cf  (v1.2.0)
 # c0f101a9cce5e43a81fceabbfb9bfed2802634f5372813b4d4a7eefc08fd6602  (v1.1)

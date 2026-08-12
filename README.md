@@ -1,8 +1,8 @@
-# Volume Verifier 1.3
+# Volume Verifier 1.4
 
-A deliberately minimal Windows utility that verifies that a volume belongs
-to a previously registered system — based on **observable metadata**, not on
-decryption.
+A deliberately minimal Windows/Linux utility that verifies that a volume
+belongs to a previously registered system — based on **observable metadata**,
+not on decryption.
 
 > **Volume Verifier verifies continuity of observable volume metadata; it
 > does not prove physical ownership of hardware.**
@@ -10,7 +10,8 @@ decryption.
 ## What it does
 
 - Reads the volume `UniqueId` via PowerShell `Get-Volume` and the BitLocker
-  `Volume ID` via `manage-bde -status` (Windows).
+  `Volume ID` via `manage-bde -status` (Windows); the filesystem UUID and
+  LUKS UUID via `findmnt`/`lsblk`/`cryptsetup` (Linux).
 - Computes a SHA-256 fingerprint of that metadata.
 - On `--register`: stores the identity in a DPAPI-protected local store
   (`%USERPROFILE%\.volume_verifier\identity_store.json` by default).
@@ -26,6 +27,7 @@ STRENGTH: STANDARD
 ```powershell
 volume-verifier.exe --volume C: --register   # register C:
 volume-verifier.exe --volume C:              # verify C:
+volume-verifier.exe --volume C: --raw        # verify with raw-sector corroboration
 ```
 
 ## What it does NOT do
@@ -40,31 +42,61 @@ volume-verifier.exe --volume C:              # verify C:
 
 | Strength | Observations | Meaning |
 |---|---|---|
-| WEAK | `UniqueId` only | The volume was not BitLocker-protected at registration time |
-| STANDARD | `UniqueId` + BitLocker `Volume ID` | The volume was BitLocker-protected at registration time |
+| WEAK | `UniqueId` only | The volume was not BitLocker/LUKS-protected at registration time |
+| STANDARD | `UniqueId` + BitLocker `Volume ID` / LUKS UUID | The volume was encrypted at registration time |
+| RAW | API identity + independent raw sector reads | Verification-time upgrade (`--raw`): a second, independent evidence channel confirms the identity |
 
-There is intentionally **no STRONG tier**: this project has no
-hardware-backed attestation, so a STRONG claim would be dishonest.
+RAW is a **verdict-time strength**, never stored: the registered entry keeps
+its WEAK/STANDARD strength, and a verify with `--raw` upgrades the verdict
+to RAW only when the raw sector evidence agrees.
 
 - The identity strength is fixed at registration and cannot be silently
   upgraded or downgraded.
-- A STANDARD identity cannot be verified if BitLocker metadata becomes
-  unavailable: the result is `DENY / BITLOCKER_METADATA_UNAVAILABLE`, never
-  a silent fallback to `UniqueId` only.
+- A STANDARD identity cannot be verified if BitLocker/LUKS metadata becomes
+  unavailable: the result is `DENY / BITLOCKER_METADATA_UNAVAILABLE` or
+  `DENY / LUKS_METADATA_UNAVAILABLE`, never a silent fallback.
 - A fingerprint is only comparable within the same platform; every stored
   identity carries its platform.
+
+## Raw corroboration (`--raw`)
+
+Volume Verifier has **two independent evidence channels**:
+
+| Channel | Windows | Linux |
+|---|---|---|
+| API | `Get-Volume` UniqueId, `manage-bde` Volume ID | `lsblk` UUID, `cryptsetup luksUUID` |
+| RAW | NTFS VBR serial (`\\.\C:`), BitLocker FVE volume identifier (physical disk at the partition offset) | LUKS header UUID, ext4 superblock UUID (direct device reads) |
+
+`--raw` is opt-in and requires **administrator/root** (raw device access).
+Rules — no silent fallback:
+
+- Both channels must agree → `PASS / MATCHED_REGISTERED_IDENTITY / STRENGTH: RAW`.
+- A disagreement (different FVE GUID, LUKS UUID present on disk but not per
+  API, or a registered raw serial that changed) → `DENY / EVIDENCE_CONFLICT`.
+- Raw evidence that cannot be acquired (no elevation, device busy) →
+  `ERROR / RAW_INSUFFICIENT_PRIVILEGES` or `ERROR / RAW_READ_FAILED`.
+
+`--register --raw` records the raw identifiers (NTFS serial, FVE GUID, LUKS
+UUID, ext4 UUID) as optional entry fields so later verifications can also
+check raw-to-raw continuity. Pre-v1.4 entries without those fields still
+verify — the raw-to-API comparison works on its own.
+
+Implementation: `source/crypto/raw/` — pure-stdlib sector parsing
+(NTFS VBR, BitLocker FVE, LUKS v1/v2, ext4 superblock, swap detection) with
+abstract error mapping.
 
 ## Reason codes and exit codes
 
 | Exit | Verdict | Reason | Meaning |
 |---|---|---|---|
-| 0 | PASS | `MATCHED_REGISTERED_IDENTITY` | Fingerprint matches the registered identity |
+| 0 | PASS | `MATCHED_REGISTERED_IDENTITY` | Fingerprint matches the registered identity (RAW strength when corroborated) |
 | 1 | DENY | `FINGERPRINT_MISMATCH` | Metadata present but fingerprint differs (e.g. a copy) |
 | 1 | DENY | `NOT_REGISTERED` | Store exists but the volume was never registered |
 | 1 | DENY | `STORE_MISSING` | No identity store found |
 | 1 | DENY | `BITLOCKER_METADATA_UNAVAILABLE` | STANDARD identity, but no BitLocker Volume ID now |
 | 1 | DENY | `BITLOCKER_QUERY_FAILED` | `manage-bde` failed (e.g. tool missing) |
 | 1 | DENY | `INSUFFICIENT_PRIVILEGES` | `manage-bde` needs elevation |
+| 1 | DENY | `EVIDENCE_CONFLICT` | `--raw`: API and raw sector evidence disagree |
 | 2 | ERROR | `UNSUPPORTED_PLATFORM` | Not Windows or Linux (macOS) |
 | 2 | ERROR | `STORE_CORRUPTED` | Store cannot be decrypted or parsed |
 | 2 | ERROR | `STORE_SCHEMA_MISMATCH` | Store format/protection incompatible (re-register) |
@@ -74,6 +106,8 @@ hardware-backed attestation, so a STRONG claim would be dishonest.
 | 2 | ERROR | `VOLUME_QUERY_FAILED` | `Get-Volume` returned no UniqueId / lsblk returned no UUID |
 | 2 | ERROR | `BITLOCKER_METADATA_UNAVAILABLE` | STANDARD entry but BitLocker Volume ID now unreadable (win32) |
 | 2 | ERROR | `LUKS_METADATA_UNAVAILABLE` | STANDARD entry but LUKS UUID now unreadable (linux) |
+| 2 | ERROR | `RAW_READ_FAILED` | `--raw`: raw sector evidence could not be read |
+| 2 | ERROR | `RAW_INSUFFICIENT_PRIVILEGES` | `--raw`: raw device access requires administrator/root |
 | 2 | ERROR | `INVALID_ARGS` | Invalid volume argument |
 
 A failure to acquire evidence is **never** converted into a valid identity:
@@ -113,6 +147,9 @@ every failure produces an explicit reason code.
 - **Windows 10/11** with BitLocker tooling available. **Linux** (kernel 5.10+, `findmnt`/`lsblk`/`cryptsetup` in PATH) is supported experimentally with HMAC_PASSPHRASE stores. **macOS** is rejected explicitly with `UNSUPPORTED_PLATFORM` (no genuine macOS hardware available, VM .iso is malleable).
 - `manage-bde` queries may require an elevated shell; a failed query is an
   explicit error, never a silent WEAK fallback.
+- `--raw` (raw sector corroboration) requires an **administrator** shell on
+  Windows and **root** on Linux; without elevation it fails explicitly with
+  `RAW_INSUFFICIENT_PRIVILEGES`.
 - A previous `--register` must exist; without a stored identity the verdict
   is `DENY`.
 
@@ -123,6 +160,9 @@ SOURCE ──▶ BUILD ──▶ SHA256 ──▶ EXECUTABLE
 ```
 
 - `source/volume_verifier.py` — the full implementation.
+- `source/crypto/raw/` — the raw evidence channel: pure-stdlib sector
+  parsing (NTFS VBR, BitLocker FVE, LUKS v1/v2, ext4 superblock, swap
+  detection) and Shamir threshold crypto, with binary fixtures.
 - `build.ps1` — the exact build procedure (PyInstaller `--onefile`), which
   also prints the SHA-256 of the produced binary.
 - `SHA256SUMS.txt` — real hashes of the published binary and of reference
@@ -138,6 +178,8 @@ SOURCE ──▶ BUILD ──▶ SHA256 ──▶ EXECUTABLE
   and `DENY` for the copy.
 - `evidence/hardening-v1.1/` — hardening record: test results, build
   results, hashes, and the reviewer-issue matrix.
+- `evidence/raw-corroboration/` — v1.4 raw corroboration record
+  (`--raw`); `evidence/crypto-raw/` — crypto.raw module test results.
 
 ## Supported platforms
 
@@ -165,6 +207,7 @@ observations changes:
 |----------|---------|-------|
 | WEAK | FS UniqueId only | Filesystem UUID only (no LUKS) |
 | STANDARD | FS UniqueId + BitLocker Volume ID | Filesystem UUID + LUKS UUID |
+| RAW (`--raw` verdict) | STANDARD/WEAK identity + FVE GUID / NTFS serial raw reads | STANDARD/WEAK identity + LUKS / ext4 UUID raw reads |
 
 The Linux classification mirrors Windows: only volumes with encryption
 metadata (LUKS) reach STANDARD. A disk copy preserves filesystem UUID and
@@ -189,6 +232,7 @@ filesystem reformat, not disk copying (documented, not assumed).
 | Portable metadata reader | protocol done (`evidence/portable-reader/`) | read-only, no unlock/decrypt/write |
 | TPM identity | protocol done (`evidence/tpm-identity/`) | platform evidence only, never volume identity |
 | Linux platform source | **implemented v1.3** (`evidence/linux-identity/`) | no fake evidence, no macOS without hw |
+| Raw sector corroboration (`--raw`) | **implemented v1.4** (`evidence/raw-corroboration/`) | read-only, never decrypts/unlocks |
 
 Policy: no component unlocks BitLocker, decrypts content, derives or stores
 recovery keys, or provides bypass. Evidence before implementation; review
@@ -208,10 +252,12 @@ pip install -r requirements.txt
 python -m unittest discover tests -v
 ```
 
-42 tests covering fingerprinting, schema validation, DPAPI round-trip,
-tamper detection, atomic writes, legacy migration, and verdict/reason
-classification (T1–T12 scenarios) with mocked evidence acquisition — no
-real volume is modified or destroyed.
+129 tests covering fingerprinting, schema validation, DPAPI round-trip,
+tamper detection, atomic writes, legacy migration, verdict/reason
+classification (T1–T12 scenarios), raw sector parsing (NTFS VBR, BitLocker
+FVE, LUKS, ext4, swap), Shamir 2-of-3 threshold crypto, and raw
+corroboration verdicts — all with mocked evidence acquisition or synthetic
+fixtures; no real volume is modified or destroyed.
 
 ## License
 

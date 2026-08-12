@@ -23,7 +23,9 @@ behavior matches the source.
 python -m unittest discover tests -v
 ```
 
-42 tests, including the T1–T12 hardening scenarios:
+129 tests, including the T1–T12 hardening scenarios plus the crypto.raw
+suite (raw sector parsers, bounds checking, Shamir 2-of-3, error mapping)
+and the v1.4 raw-corroboration verdicts:
 
 | # | Scenario | Expectation |
 |---|---|---|
@@ -39,6 +41,12 @@ python -m unittest discover tests -v
 | T10 | Copied VHDX (different UniqueId) | `DENY FINGERPRINT_MISMATCH` (mocked) |
 | T11 | Detach/attach (same UniqueId) | PASS (mocked) |
 | T12 | Unsupported platform | `UNSUPPORTED_PLATFORM` |
+| R1 | `--raw` corroborated match | `PASS` with `STRENGTH: RAW` |
+| R2 | `--raw` FVE GUID / LUKS UUID mismatch | `DENY EVIDENCE_CONFLICT` |
+| R3 | API says BitLocker/LUKS, no header on disk | `DENY EVIDENCE_CONFLICT` |
+| R4 | Registered raw NTFS serial changed | `DENY EVIDENCE_CONFLICT` (continuity) |
+| R5 | Raw read needs privileges | `ERROR RAW_INSUFFICIENT_PRIVILEGES` |
+| R6 | `--raw` off | raw channel never touched |
 
 All tests use mocked evidence acquisition and temporary stores. No real
 volume is modified, destroyed, unlocked, or formatted.
@@ -295,7 +303,7 @@ Expected behaviors (same HMAC store model as Windows):
 
 Full raw evidence and experiment logs in `evidence/linux-identity/raw/`.
 
-## 7. Test matrix (v1.3)
+## 7. Test matrix (v1.4)
 
 | Platform | Store | Passphrase | Expected outcome |
 |----------|-------|------------|------------------|

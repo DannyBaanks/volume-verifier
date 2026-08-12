@@ -25,7 +25,7 @@ Rule of thumb: if a name could be confused with internal vocabulary, the
 public repo uses a plain, generic name instead — or does not introduce the
 abstraction at all.
 
-## Current structure (v1.3, Windows + Linux)
+## Current structure (v1.4, Windows + Linux)
 
 ```
 volume-verifier.exe / volume_verifier.py
@@ -80,6 +80,7 @@ volume-verifier (product)
 └── platform sources (one per OS)
     ├── windows   # PowerShell Get-Volume + manage-bde (v1.x)
     ├── linux     # findmnt + lsblk + cryptsetup (v1.3, evidence-backed)
+    ├── raw       # crypto/raw sector parsing (v1.4 --raw corroboration)
     └── macos     # diskutil/APFS metadata (planned — needs real hardware)
 ```
 
