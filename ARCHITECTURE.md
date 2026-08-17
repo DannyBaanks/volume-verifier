@@ -17,9 +17,8 @@ internal architecture or internal vocabulary. Specifically:
 **INTERNAL (never here):**
 - Internal orchestration, internal abstractions, internal vocabulary.
 - Internal implementation details of the wider ecosystem.
-- Anything from the publication denylist (see the private `do-not-publish`
-  repository). If a candidate change matches the denylist: STOP, human
-  review, no automatic modifications.
+- Anything not approved for public release: STOP, human review, no automatic
+  modifications.
 
 Rule of thumb: if a name could be confused with internal vocabulary, the
 public repo uses a plain, generic name instead — or does not introduce the
@@ -143,5 +142,5 @@ Standing policy (applies to every line, current and future):
   out of scope, by definition.
 - Read-only whenever technically possible.
 - Experiment/evidence first; implementation after.
-- Before publishing any component: denylist review (private
-  `do-not-publish` repository); on doubt, ask José Daniel / Danny.
+- Before publishing any component: publication review; on doubt, ask José
+  Daniel / Danny.
